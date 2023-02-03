@@ -1,0 +1,46 @@
+image: docker:dind
+
+stages:
+  - build
+  - deploy
+
+# Docker
+.docker_login: &docker_login
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_JOB_TOKEN $CI_REGISTRY
+
+.docker_build: &docker_build
+  script:
+    - docker pull $CI_REGISTRY_IMAGE:$LAST_IMAGE_TAG || true
+    - docker build --cache-from $CI_REGISTRY_IMAGE:$LAST_IMAGE_TAG -t $CI_REGISTRY_IMAGE:$CI_BUILD_REF_NAME -t $CI_REGISTRY_IMAGE:$LAST_IMAGE_TAG .
+    - docker push $CI_REGISTRY_IMAGE:$CI_BUILD_REF_NAME
+    - docker push $CI_REGISTRY_IMAGE:$LAST_IMAGE_TAG
+
+# Tag Restrictions
+.dev_restrictions: &dev_restrictions
+  only:
+    refs:
+      - tags
+    variables:
+      - $CI_BUILD_REF_NAME =~ /^\d+\.\d+\.\d+$/
+
+# Stage Build
+build_dev:
+  stage: build
+  <<: *dev_restrictions
+  <<: *docker_login
+  <<: *docker_build
+  variables:
+    LAST_IMAGE_TAG: latest
+
+# Stage Deploy
+.deploy: &deploy
+  stage: deploy
+  before_script: ['apk --no-cache add curl']
+  script: 'curl -X POST -F token=$INFR_TRIGGER_TOKEN -F ref=master -F "variables[DEPLOY]=true" -F "variables[APP]=chat-bot" -F "variables[OVERLAY]=$OVERLAY" -F "variables[IMAGE_TAG]=$CI_BUILD_REF_NAME" https://gitlab.itnap.ru/api/v4/projects/1557/trigger/pipeline'
+
+deploy_dev:
+  <<: *dev_restrictions
+  <<: *deploy
+  variables:
+    OVERLAY: dev
